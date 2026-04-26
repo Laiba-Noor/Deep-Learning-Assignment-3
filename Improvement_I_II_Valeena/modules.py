@@ -26,12 +26,12 @@ class BatchLinear(nn.Linear, MetaModule):
 
 
 class Sine(nn.Module):
-    def __init(self):
+    def __init__(self, omega_0=30):
         super().__init__()
+        self.omega_0 = omega_0
 
     def forward(self, input):
-        # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of factor 30
-        return torch.sin(30 * input)
+        return torch.sin(self.omega_0 * input)
 
 
 class FCBlock(MetaModule):
@@ -40,14 +40,15 @@ class FCBlock(MetaModule):
     '''
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None):
+             outermost_linear=False, nonlinearity='relu', weight_init=None, **kwargs):
         super().__init__()
 
         self.first_layer_init = None
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
-        nls_and_inits = {'sine':(Sine(), sine_init, first_layer_sine_init),
+        self.omega_0 = kwargs.get('omega_0', 30)
+        nls_and_inits = {'sine':(Sine(omega_0=self.omega_0), sine_init, first_layer_sine_init),
                          'relu':(nn.ReLU(inplace=True), init_weights_normal, None),
                          'sigmoid':(nn.Sigmoid(), init_weights_xavier, None),
                          'tanh':(nn.Tanh(), init_weights_xavier, None),
@@ -115,6 +116,12 @@ class FCBlock(MetaModule):
                 activations['_'.join((str(sublayer.__class__), "%d" % i))] = x
         return activations
 
+    def update_omega(self, new_omega):
+        """Update omega_0 in all Sine activation layers — used by CAOS-SIREN"""
+        for module in self.modules():
+            if isinstance(module, Sine):
+                module.omega_0 = new_omega
+
 
 class SingleBVPNet(MetaModule):
     '''A canonical representation network for a BVP.'''
@@ -164,6 +171,12 @@ class SingleBVPNet(MetaModule):
         coords = model_input['coords'].clone().detach().requires_grad_(True)
         activations = self.net.forward_with_activations(coords)
         return {'model_in': coords, 'model_out': activations.popitem(), 'activations': activations}
+
+    def update_omega(self, new_omega):
+        """Update omega_0 in all Sine layers — used by CAOS-SIREN"""
+        for module in self.modules():
+            if isinstance(module, Sine):
+                module.omega_0 = new_omega
 
 
 class PINNet(nn.Module):
